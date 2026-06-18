@@ -13,4 +13,4 @@ COPY --chown=user . .
 
 EXPOSE 7860
 
-CMD ["python", "app.py"]
+CMD ["gunicorn", "--bind", "0.0.0.0:7860", "--workers", "1", "--timeout", "120", "--preload", "app:app"]
