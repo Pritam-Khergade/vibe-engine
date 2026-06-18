@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import './App.css';
-import { STATS } from './data/stats';
+import { STATS, QUOTES, SOURCE_LINE, SURVEY_LABEL } from './data/stats';
 import { useSession, MOOD_BASELINE } from './context/SessionContext';
 import { fetchTracksByMood, MOOD_GENRE_WEIGHTS } from './services/vibeApi';
 
@@ -431,12 +431,12 @@ const FINDINGS = [
 ];
 
 const RESEARCH_CARDS = [
-  { num: '01', stat: STATS.STUCK_IN_LOOP,    finding: 'of surveyed users feel stuck hearing the same songs every session', feature: 'Mood Intent Declaration',       desc: 'Declare your emotional state before the algorithm makes a single decision' },
-  { num: '02', stat: STATS.UNDERSTAND_WHY,   finding: 'only understand why a song was recommended to them',               feature: 'Contextual Explanation Card',    desc: 'Every track gets a plain-language reason that changes per mood and activity' },
-  { num: '03', stat: STATS.TRY_WITH_CONTEXT, finding: 'would try new music if the app explained mood context before they commit', feature: '✦ AI-matched badge + sub-scores', desc: 'Mood fit, Energy fit, Freshness — three signals that make the match credible' },
-  { num: '04', stat: '53%',    finding: 'say finding new music takes too much effort — it requires active navigation', feature: 'Activity Context Selector',   desc: 'Mood + activity = full context in 2 taps. Zero navigation required.' },
-  { num: '05', stat: '6.8%',   finding: 'of all reviews contain explicit churn signals — leaving after years of loyalty', feature: 'Bubble Breaker Mode',        desc: 'Explicit toggle to break the genre loop before the algorithm traps you in it' },
-  { num: '06', stat: '3.12/5', finding: 'average recommendation satisfaction — mediocre trust in the algorithm', feature: 'Session Feedback Loop',       desc: 'Every skip and follow visibly teaches the model this session — not next week' },
+  { num: '01', stat: `${STATS.feelStuck}%`,           finding: 'of surveyed users feel stuck hearing the same songs every session',        feature: 'Mood Intent Declaration',        desc: 'Declare your emotional state before the algorithm makes a single decision' },
+  { num: '02', stat: `${100 - STATS.dontKnowWhy}%`,   finding: 'only understand why a song was recommended to them',                       feature: 'Contextual Explanation Card',     desc: 'Every track gets a plain-language reason that changes per mood and activity' },
+  { num: '03', stat: `${STATS.wantExplanation}%`,      finding: 'would try new music if the app explained mood context before they commit',  feature: '✦ AI-matched badge + sub-scores', desc: 'Mood fit, Energy fit, Freshness — three signals that make the match credible' },
+  { num: '04', stat: `${STATS.effortBarrier}%`,        finding: 'say finding new music takes too much effort — it requires active navigation', feature: 'Activity Context Selector',      desc: 'Mood + activity = full context in 2 taps. Zero navigation required.' },
+  { num: '05', stat: '6.8%',                           finding: 'of all reviews contain explicit churn signals — leaving after years of loyalty', feature: 'Bubble Breaker Mode',        desc: 'Explicit toggle to break the genre loop before the algorithm traps you in it' },
+  { num: '06', stat: `${STATS.recommendationScore}/5`, finding: 'average recommendation satisfaction — mediocre trust in the algorithm',    feature: 'Session Feedback Loop',          desc: 'Every skip and follow visibly teaches the model this session — not next week' },
 ];
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
@@ -684,13 +684,13 @@ function MoodSelector({ onMoodSelect }) {
       <div className="survey-panel">
         <div className="survey-header">
           <div className="survey-dot" />
-          <span className="survey-title">PRIMARY RESEARCH · n=6 · June 2026</span>
+          <span className="survey-title">{SURVEY_LABEL}</span>
         </div>
         {[
-          { pct: '94%', color: '#F59E0B', label: 'replay same songs every session' },
-          { pct: '82%', color: '#EF4444', label: 'feel stuck in a music loop' },
-          { pct: '76%', color: '#8B5CF6', label: "don't know WHY a track appears" },
-          { pct: '76%', color: '#1DB954', label: 'want explanation before playing' },
+          { pct: `${STATS.replaySameSongs}%`,   color: '#F59E0B', label: 'replay same songs every session' },
+          { pct: `${STATS.feelStuck}%`,          color: '#EF4444', label: 'feel stuck in a music loop' },
+          { pct: `${STATS.dontKnowWhy}%`,        color: '#8B5CF6', label: "don't know WHY a track appears" },
+          { pct: `${STATS.wantExplanation}%`,    color: '#1DB954', label: 'want explanation before playing' },
         ].map(r => (
           <div key={r.label} className="survey-row">
             <span className="survey-pct" style={{ color: r.color }}>{r.pct}</span>
@@ -1231,9 +1231,9 @@ function WhyAIScreen({ moodColor }) {
 
       <div className="stat-cards-row">
         {[
-          { num: STATS.STUCK_IN_LOOP,    label: 'feel stuck in a loop' },
-          { num: STATS.UNDERSTAND_WHY,   label: 'understand why songs are recommended' },
-          { num: STATS.TRY_WITH_CONTEXT, label: 'would try new music with mood context' },
+          { num: `${STATS.feelStuck}%`,          label: 'feel stuck in a music loop' },
+          { num: `${100 - STATS.dontKnowWhy}%`,  label: 'understand why songs are recommended' },
+          { num: `${STATS.wantExplanation}%`,     label: 'would try new music with mood context' },
         ].map(s => (
           <div key={s.num} className="stat-card">
             <div className="stat-number">{s.num}</div>
@@ -1241,13 +1241,13 @@ function WhyAIScreen({ moodColor }) {
           </div>
         ))}
       </div>
-      <p className="source-line">From {STATS.SOURCE_LINE}</p>
+      <p className="source-line">From {SOURCE_LINE}</p>
 
       <h2 className="screen-title" style={{ fontSize: '18px', marginTop: '8px' }}>Why Traditional Systems Fail</h2>
       {[
         ['Recommends based on what others like you listened to', 'Starts by asking what YOU need from music right now'],
         ['Gets more conservative over time — same songs forever', 'Expand My Taste mode breaks the bubble on demand'],
-        [`No explanation — feels random to ${STATS.TRY_WITH_CONTEXT} of users`, 'Explains every match in plain language before you commit'],
+        [`No explanation — feels random to ${STATS.dontKnowWhy}% of users`, 'Explains every match in plain language before you commit'],
       ].map(([trad, ve], i) => (
         <div key={i} className="comparison-row">
           <div className="comparison-cell traditional">
@@ -1311,7 +1311,7 @@ function ResearchScreen({ moodColor }) {
       <p className="eyebrow">PART 3 · RESEARCH EVIDENCE</p>
       <h2 className="screen-title">From Research to Product</h2>
       <p className="screen-sub">Every feature in Vibe Engine is backed by data</p>
-      <p className="source-line">{STATS.SOURCE_LINE}</p>
+      <p className="source-line">{SOURCE_LINE}</p>
 
       {RESEARCH_CARDS.map(card => (
         <div key={card.num} className="research-card">
@@ -1324,13 +1324,25 @@ function ResearchScreen({ moodColor }) {
         </div>
       ))}
 
-      <h3 className="screen-title" style={{ fontSize: '15px', marginTop: '20px', marginBottom: '8px' }}>How the Data Was Collected</h3>
+      <h3 className="screen-title" style={{ fontSize: '15px', marginTop: '24px', marginBottom: '12px' }}>What Users Said</h3>
+      <p style={{ fontSize: '11px', color: '#666', marginBottom: '12px' }}>{SURVEY_LABEL} · verbatim responses</p>
+      {QUOTES.map((q, i) => (
+        <div key={i} className="quote-card">
+          <p className="quote-text">"{q.text}"</p>
+          <div className="quote-footer">
+            <span className="quote-source">{q.source}</span>
+            <span className={`quote-theme quote-theme-${q.theme}`}>{q.theme}</span>
+          </div>
+        </div>
+      ))}
+
+      <h3 className="screen-title" style={{ fontSize: '15px', marginTop: '24px', marginBottom: '8px' }}>How the Data Was Collected</h3>
       <div className="data-sources-grid">
         {[
           { label: 'Google Play Store', value: 'google-play-scraper Python library' },
           { label: 'Apple App Store',   value: 'iTunes RSS feed (direct API)' },
-          { label: 'User Survey',       value: '17 respondents via Google Form' },
-          { label: 'Total records',     value: `${STATS.TOTAL_REVIEWS} cleaned reviews analyzed` },
+          { label: 'User Survey',       value: `${STATS.sampleSize} respondents via Google Form · ${STATS.surveyDate}` },
+          { label: 'Total records',     value: `${STATS.totalReviews.toLocaleString()} cleaned reviews analyzed` },
         ].map(s => (
           <div key={s.label} className="data-source-cell">
             <p className="data-source-label">{s.label}</p>

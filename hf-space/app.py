@@ -279,6 +279,33 @@ WARMUP_POOL = [
     ('Neha Kakkar',                 'O Humsafar',                        'emotional'),
     ('Darshan Raval',               'Tera Zikr',                         'emotional'),
     ('Jubin Nautiyal',              'Lut Gaye',                          'emotional'),
+
+    # ── Dhurandhar (2025) ──────────────────────────────────────────────────
+    ('Arijit Singh',                'Gehra Hua',                         'emotional'),
+    ('Arijit Singh',                'Phir Se',                           'emotional'),
+    ('Jubin Nautiyal',              'Aakhri Ishq',                       'emotional'),
+    ('Diljit Dosanjh',              'Teri Ni Kararan',                   'emotional'),
+    ('Jasmine Sandlas',             'Jaaiye Sajna',                      'emotional'),
+    ('Satinder Sartaaj',            'Jaaiye Sajna',                      'emotional'),
+    ('Simran Choudhary',            'Lutt Le Gaya',                      'chill'),
+    ('Madhubanti Bagchi',           'Ramba Ho',                          'chill'),
+    ('Sonu Nigam',                  'Move Yeh Ishq Ishq',                'chill'),
+    ('Diljit Dosanjh',              'Ez-Ez',                             'energized'),
+    ('Hanumankind',                 'Dhurandhar',                        'energized'),
+    ('Jasmine Sandlas',             'Shararat',                          'energized'),
+    ('Afsana Khan',                 'Naal Nachna',                       'energized'),
+    ('Jasmine Sandlas',             'Main Aur Tu',                       'energized'),
+    ('Madhubanti Bagchi',           'Ramba Ho',                          'energized'),
+
+    # ── Dhurandhar The Revenge (2025) ──────────────────────────────────────
+    ('Jasmine Sandlas',             'Aari Aari',                         'energized'),
+    ('Jasmine Sandlas',             'Vaari Jaavan',                      'chill'),
+    ('Jasmine Sandlas',             'Rang De Lal',                       'energized'),
+    ('Jubin Nautiyal',              'Aakhri Ishq',                       'emotional'),
+    ('Arijit Singh',                'Phir Se Dhurandhar',                'emotional'),
+    ('Jasmine Sandlas',             'Main Aur Tu',                       'energized'),
+    ('Vaibhav Gupta',               'Destiny Mann Atkeya',               'focused'),
+    ('Shahzad Ali',                 'Ishq Jalakar',                      'emotional'),
 ]
 
 def _prewarm_one(artist, track, mood):
