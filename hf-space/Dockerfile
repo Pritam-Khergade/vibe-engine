@@ -1,5 +1,11 @@
 FROM python:3.11-slim
 
+# Install SSL certificates (required for iTunes API HTTPS requests)
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates && \
+    update-ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
 RUN useradd -m -u 1000 user
 USER user
 ENV PATH="/home/user/.local/bin:${PATH}"

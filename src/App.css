@@ -1518,3 +1518,33 @@ button { cursor: pointer; font-family: var(--font); }
   background: rgba(255,255,255,0.02);
   border-bottom: 1px solid rgba(255,255,255,0.05);
 }
+
+/* ── Test Screen ─────────────────────────────────────────────────────────── */
+.test-screen { padding: 20px 16px 100px; max-width: 600px; margin: 0 auto; }
+.test-mood-group { margin-bottom: 28px; }
+.test-mood-header {
+  font-size: 13px; font-weight: 700; letter-spacing: 0.08em;
+  border-left: 3px solid; padding: 6px 10px; margin-bottom: 8px;
+  display: flex; align-items: center; gap: 8px;
+}
+.test-count { font-weight: 400; opacity: 0.7; margin-left: auto; font-size: 11px; }
+.test-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.06);
+  margin-bottom: 4px; background: var(--bg2);
+  transition: background 0.15s;
+}
+.test-row-playing { background: rgba(var(--mood-color-rgb, 99,102,241), 0.1); border-color: var(--mood-color); }
+.test-num { font-size: 11px; color: var(--off); min-width: 22px; text-align: right; }
+.test-info { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.test-artist { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.test-track  { font-size: 12px; color: var(--off); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.test-genre  { font-size: 10px; color: var(--off); opacity: 0.6; }
+.test-play {
+  width: 32px; height: 32px; border-radius: 50%; border: 1.5px solid;
+  font-size: 11px; cursor: pointer; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  transition: background 0.15s, color 0.15s;
+}
+.test-play:disabled { opacity: 0.4; cursor: default; }

@@ -704,7 +704,7 @@ const MOOD_ENERGY_LABEL = {
 };
 
 function DiscoveryScreen({ mood, activity, skips, onSkip, onNudgeAccept, followed, onFollow, yt, bubbleBreaker, sessionSignals }) {
-  const [idx,              setIdx]              = useState(0);
+  const [idx,              setIdx]              = useState(() => Math.floor(Math.random() * (DISCOVERY_DATA[mood.id]?.length || 50)));
   const [liked,            setLiked]            = useState(false);
   const [animDir,          setAnimDir]          = useState('in');
   const [showNudge,        setShowNudge]        = useState(false);
@@ -754,19 +754,14 @@ function DiscoveryScreen({ mood, activity, skips, onSkip, onNudgeAccept, followe
 
   // Reset on mood change
   useEffect(() => {
-    setIdx(0); setLiked(false); setAnimDir('in'); setShowNudge(false);
+    const pool = DISCOVERY_DATA[mood.id] || DISCOVERY_DATA.chill;
+    setIdx(Math.floor(Math.random() * pool.length));
+    setLiked(false); setAnimDir('in'); setShowNudge(false);
   }, [mood.id]);
 
   // Stop audio on card change
   const stopFn = yt.stop;
   useEffect(() => { stopFn(); }, [idx, stopFn]);
-
-  // Autoplay new card (user mood click = gesture, satisfies browser policy)
-  const toggleFn = yt.toggle;
-  useEffect(() => {
-    const t = setTimeout(() => { toggleFn(card.artist, card.track); }, 600);
-    return () => clearTimeout(t);
-  }, [idx, mood.id]); // intentional: card/toggleFn are stable derivatives of idx and mood.id
 
   // Nudge after 3 skips
   useEffect(() => { if (skips >= 3) setShowNudge(true); }, [skips]);
@@ -1337,6 +1332,74 @@ function ResearchScreen({ moodColor }) {
   );
 }
 
+// ─── SCREEN 7: Test (dev only) ────────────────────────────────────────────────
+
+const MOOD_META = [
+  { id: 'energized', label: 'Energized', color: '#F59E0B', emoji: '⚡' },
+  { id: 'focused',   label: 'Focused',   color: '#6366F1', emoji: '🎯' },
+  { id: 'chill',     label: 'Chill',     color: '#06B6D4', emoji: '🌊' },
+  { id: 'emotional', label: 'Emotional', color: '#EC4899', emoji: '🌙' },
+];
+
+function TestScreen({ yt }) {
+  const [playing, setPlaying] = useState(null);
+
+  const handlePlay = (artist, track) => {
+    const key = `${artist}||${track}`;
+    if (playing === key) {
+      yt.stop();
+      setPlaying(null);
+    } else {
+      yt.toggle(artist, track);
+      setPlaying(key);
+    }
+  };
+
+  return (
+    <div className="test-screen">
+      <p className="mood-eyebrow" style={{ color: '#F59E0B' }}>DEV · TEMPORARY</p>
+      <h2 className="screen-title">All Artists — Test View</h2>
+      <p className="screen-sub" style={{ marginBottom: 24 }}>
+        {Object.values(DISCOVERY_DATA).reduce((a, c) => a + c.length, 0)} tracks across 4 moods · tap ▶ to preview
+      </p>
+
+      {MOOD_META.map(({ id, label, color, emoji }) => {
+        const artists = DISCOVERY_DATA[id] || [];
+        return (
+          <div key={id} className="test-mood-group">
+            <div className="test-mood-header" style={{ borderColor: color, color }}>
+              {emoji} {label} <span className="test-count">{artists.length} artists</span>
+            </div>
+            {artists.map((card, i) => {
+              const key = `${card.artist}||${card.track}`;
+              const isPlaying = yt.playing && playing === key;
+              const isLoading = yt.loading && playing === key;
+              return (
+                <div key={i} className={`test-row${isPlaying ? ' test-row-playing' : ''}`} style={{ '--mood-color': color }}>
+                  <span className="test-num">{i + 1}</span>
+                  <div className="test-info">
+                    <span className="test-artist">{card.artist}</span>
+                    <span className="test-track">{card.track}</span>
+                    <span className="test-genre">{card.genre} · {card.listeners}</span>
+                  </div>
+                  <button
+                    className="test-play"
+                    style={{ background: isPlaying ? color : 'transparent', borderColor: color, color: isPlaying ? '#000' : color }}
+                    onClick={() => handlePlay(card.artist, card.track)}
+                    disabled={isLoading}
+                  >
+                    {isLoading ? '…' : isPlaying ? '⏸' : '▶'}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ─── APP ──────────────────────────────────────────────────────────────────────
 
 const NAV = [
@@ -1346,6 +1409,7 @@ const NAV = [
   { id: 'workflow', label: 'Workflow',  icon: '⟳' },
   { id: 'research', label: 'Research',  icon: '🔬' },
   { id: 'taste',    label: 'My Taste',  icon: '📈' },
+  { id: 'test',     label: 'Test',      icon: '🧪' },
 ];
 
 export default function App() {
@@ -1415,6 +1479,7 @@ export default function App() {
     else if (id === 'research') setScreen('research');
     else if (id === 'taste')   setScreen(mood ? 'taste'     : 'mood');
     else if (id === 'discover') setScreen(mood ? 'discovery' : 'mood');
+    else if (id === 'test')     setScreen('test');
   };
 
   const mc = mood ? mood.color : '#6366F1';
@@ -1472,6 +1537,7 @@ export default function App() {
             {screen === 'workflow'  && <WorkflowScreen />}
             {screen === 'whyai'     && <WhyAIScreen moodColor={mc} />}
             {screen === 'research'  && <ResearchScreen moodColor={mc} />}
+            {screen === 'test'      && <TestScreen yt={yt} />}
             {screen === 'taste'     && mood && (
               <TasteScreen
                 mood={mood} followed={followed}
