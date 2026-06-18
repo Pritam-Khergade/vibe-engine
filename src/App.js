@@ -1014,9 +1014,7 @@ function DiscoveryScreen({ mood, activity, skips, onSkip, onNudgeAccept, followe
               </div>
               <div className="player-times">
                 <span>{formatTime(yt.currentTime)}</span>
-                {yt.error
-                  ? <span className="player-error-msg">Audio preview loading...</span>
-                  : <span>{formatTime(yt.duration)}</span>}
+                <span>{formatTime(yt.duration)}</span>
               </div>
             </div>
 
