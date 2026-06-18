@@ -1,5 +1,6 @@
 import os
 import time
+import random
 import threading
 import requests
 from flask import Flask, jsonify, request, Response
@@ -8,7 +9,7 @@ from flask_cors import CORS
 app = Flask(__name__)
 CORS(app)
 
-CACHE_TTL = 6 * 3600  # iTunes preview URLs are stable; refresh every 6h
+CACHE_TTL = 6 * 3600
 
 # ── In-memory cache ────────────────────────────────────────────────────────────
 _cache      = {}
@@ -25,9 +26,17 @@ def _cache_set(key, url):
     with _cache_lock:
         _cache[key] = {'url': url, 'ts': time.time()}
 
+# ── Mood index: mood -> list of "artist||track" keys ──────────────────────────
+_mood_index      = {'energized': [], 'focused': [], 'chill': [], 'emotional': []}
+_mood_index_lock = threading.Lock()
+
+def _mood_index_add(mood, key):
+    with _mood_index_lock:
+        if key not in _mood_index[mood]:
+            _mood_index[mood].append(key)
+
 # ── iTunes Search API ──────────────────────────────────────────────────────────
 def _itunes_preview(artist, track):
-    """Search iTunes and return a 30-second AAC preview URL."""
     try:
         r = requests.get(
             'https://itunes.apple.com/search',
@@ -37,12 +46,10 @@ def _itunes_preview(artist, track):
         results = r.json().get('results', [])
         artist_lower = artist.lower()
 
-        # Prefer result where artist name matches
         for res in results:
             if artist_lower in res.get('artistName', '').lower() and res.get('previewUrl'):
                 return res['previewUrl']
 
-        # Fall back to any result with a preview
         for res in results:
             if res.get('previewUrl'):
                 return res['previewUrl']
@@ -52,239 +59,245 @@ def _itunes_preview(artist, track):
 
     return None
 
-# ── Pre-warm pool — all 210 entries, mirrors DISCOVERY_DATA in App.js ──────────
+# ── Pre-warm pool: (artist, track, mood) ──────────────────────────────────────
 WARMUP_POOL = [
-    # ── Energized (60) ──
-    ('FISHER',                      'Losing It'),
-    ('Calvin Harris',               'Summer'),
-    ('Martin Garrix',               'Animals'),
-    ('Disclosure',                  'Latch'),
-    ('Daft Punk',                   'Get Lucky'),
-    ('Bicep',                       'Glue'),
-    ('Peggy Gou',                   'Nagging'),
-    ('Four Tet',                    'Kool FM'),
-    ('Skrillex',                    'Scary Monsters'),
-    ('Flume',                       'Never Be Like You'),
-    ('Kaytranada',                  'Glowed Up'),
-    ('Caribou',                     "Can't Do Without You"),
-    ('Jamie xx',                    'Gosh'),
-    ('Aphex Twin',                  'Windowlicker'),
-    ('The Chemical Brothers',       'Hey Boy Hey Girl'),
-    ('Underworld',                  'Born Slippy'),
-    ('Justice',                     'D.A.N.C.E.'),
-    ('Moderat',                     'Bad Kingdom'),
-    ('Deadmau5',                    'Ghosts N Stuff'),
-    ('Eric Prydz',                  'Call On Me'),
-    ('Nero',                        'Me and You'),
-    ('Chase & Status',              'No More Idols'),
-    ('Sub Focus',                   'Tidal Wave'),
-    ('Noisia',                      'Split the Atom'),
-    ('Pendulum',                    'Watercolour'),
-    ('Charlotte de Witte',          'Doppler'),
-    ('Amelie Lens',                 'Exhale'),
-    ('Adam Beyer',                  'Ignition Key'),
-    ('Nina Kraviz',                 "I'm Gonna Get You"),
-    ('Richie Hawtin',               'Spastik'),
-    ('Ben Klock',                   'One'),
-    ('Sven Vath',                   'The Beauty and the Beast'),
-    ('Marcel Dettmann',             'Substance'),
-    ('Objekt',                      'Needle & Thread'),
-    ('Blawan',                      'Getting Me Down'),
-    ('Pritam',                      'Badtameez Dil'),
-    ('Vishal-Shekhar',              'Desi Girl'),
-    ('Shankar Ehsaan Loy',          'Jai Ho'),
-    ('Amit Trivedi',                'Ik Bagal'),
-    ('Nucleya',                     'Bass Rani'),
-    ('Ritviz',                      'Udd Gaye'),
-    ('Divine',                      'Mere Gully Mein'),
-    ('Raftaar',                     'Swag Mera Desi'),
-    ('Badshah',                     'Paagal'),
-    ('Yo Yo Honey Singh',           'Brown Rang'),
-    ('The PropheC',                 'Wohh'),
-    ('Diljit Dosanjh',              'Do You Know'),
-    ('Guru Randhawa',               'Lahore'),
-    ('Harrdy Sandhu',               'Bijlee Bijlee'),
-    ('AP Dhillon',                  'With You'),
-    ('Shubh',                       'Still Rollin'),
-    ('Karan Aujla',                 'Softly'),
-    ('Sidhu Moosewala',             'So High'),
-    ('Hardy Sandhu',                'Naah'),
-    ('Sunidhi Chauhan',             'Sheila Ki Jawani'),
-    ('Neha Kakkar',                 'O Humsafar'),
-    ('Tony Kakkar',                 'Tera Suit'),
-    ('Darshan Raval',               'Tera Zikr'),
-    ('Jubin Nautiyal',              'Lut Gaye'),
-    ('Benny Dayal',                 'Tune Maari Entriyaan'),
-    # ── Focused (50) ──
-    ('Nils Frahm',                  'Says'),
-    ('Brian Eno',                   'An Ending'),
-    ('Max Richter',                 'On the Nature of Daylight'),
-    ('Bonobo',                      'Kong'),
-    ('Tycho',                       'Awake'),
-    ('Jon Hopkins',                 'Immunity'),
-    ('Hammock',                     'Breathturn'),
-    ('Rival Consoles',              'Phantom'),
-    ('Olafur Arnalds',              'Near Light'),
-    ('Thom Yorke',                  'Analyse'),
-    ('Nicolas Jaar',                'Space is Only Noise'),
-    ('Floating Points',             'LesAlpx'),
-    ('Apparat',                     'Goodbye'),
-    ('Arca',                        'Piel'),
-    ('Holly Herndon',               'Chorus'),
-    ('Actress',                     'Ascending'),
-    ('Lorenzo Senni',               'Superimposition'),
-    ('Tim Hecker',                  'Ravedeath 1972'),
-    ('Stars of the Lid',            'Requiem for Dying Mothers'),
-    ('Godspeed You Black Emperor',  'The Dead Flag Blues'),
-    ('Mogwai',                      'Mogwai Fear Satan'),
-    ('Explosions in the Sky',       'The Birth and Death of the Day'),
-    ('Sigur Ros',                   'Hoppipolla'),
-    ('This Will Destroy You',       'Quiet'),
-    ('Mono',                        'Ashes in the Snow'),
-    ('A.R. Rahman',                 'Dil Se Re'),
-    ('Prateek Kuhad',               'cold/mess'),
-    ('When Chai Met Toast',         'Khoj'),
-    ('The Local Train',             'Aaoge Tum Kabhi'),
-    ('Ankur Tewari',                'Iktara'),
-    ('Peter Cat Recording Co',      'Memory Box'),
-    ('Parekh & Singh',              'I Love You Baby'),
-    ('Lagori',                      'Aamchi Mumbai'),
-    ('Soulmate',                    'Soulmate Theme'),
-    ('Thermal and a Quarter',       'The Queue'),
-    ('Neon Jungle',                 'Bravado'),
-    ('Shantanu Moitra',             'Dil Dhoondta Hai'),
-    ('Shankar Mahadevan',           'Breathless'),
-    ('Pt. Ravi Shankar',            'Raga Jog'),
-    ('Zakir Hussain',               'Kirwani'),
-    ('Anoushka Shankar',            'Land of Gold'),
-    ('Niladri Kumar',               'Zitar'),
-    ('Prasanna',                    'Ragadharma'),
-    ('Mahesh Kale',                 'Abhangas'),
-    ('Vasundhara Das',              'Ekla Cholo Re'),
-    ('Rabbi Shergill',              'Bulla Ki Jaana'),
-    ('Kailash Kher',                'Teri Deewani'),
-    ('Ustad Nusrat Fateh Ali Khan', 'Tumhe Dillagi'),
-    ('Abida Parveen',               'Tere Ishq Nachaya'),
-    ('Hariharan',                   'Allah Ke Bande'),
-    # ── Chill (50) ──
-    ('Tame Impala',                 'The Less I Know The Better'),
-    ('Mac DeMarco',                 'Chamber of Reflection'),
-    ('Rex Orange County',           'Loving is Easy'),
-    ('Khruangbin',                  'A La Sala'),
-    ('Still Woozy',                 'Goodie Bag'),
-    ('Mild High Club',              'Windowpane'),
-    ('Men I Trust',                 'Tailwhip'),
-    ('Cigarettes After Sex',        'Apocalypse'),
-    ('Beach House',                 'Space Song'),
-    ('SALES',                       'Pope Is a Rockstar'),
-    ('Chet Faker',                  'Gold'),
-    ('Petit Biscuit',               'Sunset Lover'),
-    ('Pretty Boy Aaron',            'Feelings'),
-    ('Whitney',                     'No Woman'),
-    ('Big Thief',                   'Not'),
-    ('Soccer Mommy',                'Circle the Drain'),
-    ('Snail Mail',                  'Pristine'),
-    ('Clairo',                      'Pretty Girl'),
-    ('Lomelda',                     'Interstate Vision'),
-    ('Hand Habits',                 'wildfire'),
-    ('Pinegrove',                   'Old Friends'),
-    ('Hovvdy',                      'Easy'),
-    ('Squirrel Flower',             'I Was Born Swimming'),
-    ('Florist',                     'Summer Blood'),
-    ('Bedouine',                    'Solitary Daughter'),
-    ('Arijit Singh',                'Tum Hi Ho'),
-    ('Lucky Ali',                   'O Sanam'),
-    ('Mohit Chauhan',               'Tum Se Hi'),
-    ('Papon',                       'Moh Moh Ke Dhaage'),
-    ('Shafqat Amanat Ali',          'Teri Ore'),
-    ('Atif Aslam',                  'Woh Lamhe'),
-    ('Sonu Nigam',                  'Kal Ho Naa Ho'),
-    ('KK',                          'Zindagi Do Pal Ki'),
-    ('Lata Mangeshkar',             'Lag Jaa Gale'),
-    ('Kishore Kumar',               'Roop Tera Mastana'),
-    ('Mohammed Rafi',               'Baharon Phool Barsao'),
-    ('Mukesh',                      'Kabhi Kabhi Mere Dil Mein'),
-    ('Hemant Kumar',                'Na Tum Hamen Jano'),
-    ('S.D. Burman',                 'Tere Mere Sapne'),
-    ('Manna Dey',                   'Ae Bhai Zara Dekh Ke Chalo'),
-    ('Talat Mahmood',               'Jalte Hain Jiske Liye'),
-    ('Asha Bhosle',                 'Dum Maro Dum'),
-    ('Geeta Dutt',                  'Waqt Ne Kiya'),
-    ('Noor Jehan',                  'Awaz De Kahan Hai'),
-    ('Mehdi Hassan',                'Ranjish Hi Sahi'),
-    ('Ghulam Ali',                  'Chupke Chupke'),
-    ('Jagjit Singh',                'Tum Itna Jo Muskura Rahe Ho'),
-    ('Pankaj Udhas',                'Chitthi Aayi Hai'),
-    ('Anup Jalota',                 'Hari Om Hari'),
-    ('Hariharan',                   'Dil Ki Baatein'),
-    # ── Emotional (50) ──
-    ('Novo Amor',                   'Anchor'),
-    ('Bon Iver',                    'Holocene'),
-    ('Phoebe Bridgers',             'Savior Complex'),
-    ('Sufjan Stevens',              'Death With Dignity'),
-    ('Daughter',                    'Youth'),
-    ('Iron & Wine',                 'Flightless Bird'),
-    ('Gregory Alan Isakov',         'The Stable Song'),
-    ('Adrianne Lenker',             'anything'),
-    ('Nick Drake',                  'Pink Moon'),
-    ('Elliott Smith',               'Between the Bars'),
-    ('Conor Oberst',                'Lua'),
-    ('Mount Eerie',                 'Real Death'),
-    ('Car Seat Headrest',           'Drunk Drivers'),
-    ('Mitski',                      'Nobody'),
-    ('Soccer Mommy',                'Your Dog'),
-    ('Snail Mail',                  'Heat Wave'),
-    ('Lucy Dacus',                  'Night Shift'),
-    ('Julien Baker',                'Sprained Ankle'),
-    ('boygenius',                   'Bite the Hand'),
-    ('The National',                'Bloodbuzz Ohio'),
-    ('Frightened Rabbit',           'Modern Leper'),
-    ('Bright Eyes',                 'First Day of My Life'),
-    ('Death Cab for Cutie',         'I Will Follow You into the Dark'),
-    ('The Antlers',                 'Hospice'),
-    ('Owen',                        'Bad News'),
-    ('Arijit Singh',                'Channa Mereya'),
-    ('KK',                          'Yaaron'),
-    ('Jubin Nautiyal',              'Tere Liye'),
-    ('Shreya Ghoshal',              'Sun Raha Hai'),
-    ('Sonu Nigam',                  'Dil Ne Yeh Kaha Hai'),
-    ('Atif Aslam',                  'Doorie'),
-    ('Rahat Fateh Ali Khan',        'O Re Piya'),
-    ('Lata Mangeshkar',             'Ajeeb Dastan Hai Yeh'),
-    ('Mohammed Rafi',               'Kya Hua Tera Wada'),
-    ('Kishore Kumar',               'Mere Mehboob Qayamat Hogi'),
-    ('Mukesh',                      'Jeena Yahan Marna Yahan'),
-    ('Talat Mahmood',               'Ae Mere Dil Kahin Aur Chal'),
-    ('Jagjit Singh',                'Hothon Se Chhu Lo Tum'),
-    ('Mehdi Hassan',                'Zindagi Mein To Sabhi Pyar Kiya Karte Hain'),
-    ('Ghulam Ali',                  'Hungama Hai Kyun Barpa'),
-    ('Farida Khanum',               'Aaj Jaane Ki Zid Na Karo'),
-    ('Nusrat Fateh Ali Khan',       'Afreen Afreen'),
-    ('Abida Parveen',               'Tu Jhoom'),
-    ('Shafqat Amanat Ali',          'Mann Mayal'),
-    ('Kailash Kher',                'Saiyyan'),
-    ('Hariharan',                   'Kal Ho Naa Ho'),
-    ('Shankar Mahadevan',           'Tanha Dil'),
-    ('A.R. Rahman',                 'Roja Jaaneman'),
-    ('Ilaiyaraaja',                 'En Iniya Pon Nilave'),
-    ('S.P. Balasubrahmanyam',       'Ye Dil Deewana'),
+    # ── Energized ──
+    ('FISHER',                      'Losing It',                         'energized'),
+    ('Calvin Harris',               'Summer',                            'energized'),
+    ('Martin Garrix',               'Animals',                           'energized'),
+    ('Disclosure',                  'Latch',                             'energized'),
+    ('Daft Punk',                   'Get Lucky',                         'energized'),
+    ('Bicep',                       'Glue',                              'energized'),
+    ('Four Tet',                    'Kool FM',                           'energized'),
+    ('Skrillex',                    'Scary Monsters',                    'energized'),
+    ('Flume',                       'Never Be Like You',                 'energized'),
+    ('Kaytranada',                  'Glowed Up',                         'energized'),
+    ('Caribou',                     "Can't Do Without You",              'energized'),
+    ('Jamie xx',                    'Gosh',                              'energized'),
+    ('Aphex Twin',                  'Windowlicker',                      'energized'),
+    ('The Chemical Brothers',       'Hey Boy Hey Girl',                  'energized'),
+    ('Underworld',                  'Born Slippy',                       'energized'),
+    ('Justice',                     'D.A.N.C.E.',                        'energized'),
+    ('Moderat',                     'Bad Kingdom',                       'energized'),
+    ('Deadmau5',                    'Ghosts N Stuff',                    'energized'),
+    ('Eric Prydz',                  'Call On Me',                        'energized'),
+    ('Nero',                        'Me and You',                        'energized'),
+    ('Chase & Status',              'No More Idols',                     'energized'),
+    ('Sub Focus',                   'Tidal Wave',                        'energized'),
+    ('Noisia',                      'Split the Atom',                    'energized'),
+    ('Pendulum',                    'Watercolour',                       'energized'),
+    ('Charlotte de Witte',          'Doppler',                           'energized'),
+    ('Amelie Lens',                 'Exhale',                            'energized'),
+    ('Adam Beyer',                  'Ignition Key',                      'energized'),
+    ('Nina Kraviz',                 "I'm Gonna Get You",                 'energized'),
+    ('Richie Hawtin',               'Spastik',                           'energized'),
+    ('Ben Klock',                   'One',                               'energized'),
+    ('Sven Vath',                   'The Beauty and the Beast',          'energized'),
+    ('Objekt',                      'Needle & Thread',                   'energized'),
+    ('Blawan',                      'Getting Me Down',                   'energized'),
+    ('Dua Lipa',                    'Levitating',                        'energized'),
+    ('The Weeknd',                  'Blinding Lights',                   'energized'),
+    ('Post Malone',                 'Rockstar',                          'energized'),
+    ('Kanye West',                  'POWER',                             'energized'),
+    ('Pritam',                      'Badtameez Dil',                     'energized'),
+    ('Vishal-Shekhar',              'Desi Girl',                         'energized'),
+    ('Shankar Ehsaan Loy',          'Jai Ho',                            'energized'),
+    ('Amit Trivedi',                'Ik Bagal',                          'energized'),
+    ('Nucleya',                     'Bass Rani',                         'energized'),
+    ('Divine',                      'Mere Gully Mein',                   'energized'),
+    ('Raftaar',                     'Swag Mera Desi',                    'energized'),
+    ('Badshah',                     'Paagal',                            'energized'),
+    ('Yo Yo Honey Singh',           'Brown Rang',                        'energized'),
+    ('The PropheC',                 'Wohh',                              'energized'),
+    ('Diljit Dosanjh',              'Do You Know',                       'energized'),
+    ('Guru Randhawa',               'Lahore',                            'energized'),
+    ('Harrdy Sandhu',               'Bijlee Bijlee',                     'energized'),
+    ('Shubh',                       'Still Rollin',                      'energized'),
+    ('Sidhu Moosewala',             'So High',                           'energized'),
+    ('Hardy Sandhu',                'Naah',                              'energized'),
+    ('Sunidhi Chauhan',             'Sheila Ki Jawani',                  'energized'),
+    ('Tony Kakkar',                 'Tera Suit',                         'energized'),
+    ('Mika Singh',                  'Mauja Hi Mauja',                    'energized'),
+    ('Honey Singh',                 'Lungi Dance',                       'energized'),
+    ('Garry Sandhu',                'Tenu Suit Suit Karda',              'energized'),
+    ('Imran Khan',                  'Amplifier',                         'energized'),
+    ('Bilal Saeed',                 '12 Saal',                           'energized'),
+    # ── Focused ──
+    ('Nils Frahm',                  'Says',                              'focused'),
+    ('Brian Eno',                   'An Ending',                         'focused'),
+    ('Max Richter',                 'On the Nature of Daylight',         'focused'),
+    ('Bonobo',                      'Kong',                              'focused'),
+    ('Tycho',                       'Awake',                             'focused'),
+    ('Jon Hopkins',                 'Immunity',                          'focused'),
+    ('Hammock',                     'Breathturn',                        'focused'),
+    ('Rival Consoles',              'Phantom',                           'focused'),
+    ('Olafur Arnalds',              'Near Light',                        'focused'),
+    ('Thom Yorke',                  'Analyse',                           'focused'),
+    ('Nicolas Jaar',                'Space is Only Noise',               'focused'),
+    ('Floating Points',             'LesAlpx',                           'focused'),
+    ('Apparat',                     'Goodbye',                           'focused'),
+    ('Arca',                        'Piel',                              'focused'),
+    ('Holly Herndon',               'Chorus',                            'focused'),
+    ('Actress',                     'Ascending',                         'focused'),
+    ('Tim Hecker',                  'Ravedeath 1972',                    'focused'),
+    ('Stars of the Lid',            'Requiem for Dying Mothers',         'focused'),
+    ('Godspeed You Black Emperor',  'The Dead Flag Blues',               'focused'),
+    ('Mogwai',                      'Mogwai Fear Satan',                 'focused'),
+    ('Explosions in the Sky',       'The Birth and Death of the Day',    'focused'),
+    ('Explosions in the Sky',       'Your Hand in Mine',                 'focused'),
+    ('Sigur Ros',                   'Hoppipolla',                        'focused'),
+    ('This Will Destroy You',       'Quiet',                             'focused'),
+    ('Mono',                        'Ashes in the Snow',                 'focused'),
+    ('A.R. Rahman',                 'Dil Se Re',                         'focused'),
+    ('A.R. Rahman',                 'Lukka Chuppi',                      'focused'),
+    ('Prateek Kuhad',               'cold/mess',                         'focused'),
+    ('When Chai Met Toast',         'Khoj',                              'focused'),
+    ('The Local Train',             'Aaoge Tum Kabhi',                   'focused'),
+    ('Peter Cat Recording Co',      'Memory Box',                        'focused'),
+    ('Parekh & Singh',              'I Love You Baby',                   'focused'),
+    ('Soulmate',                    'Soulmate Theme',                    'focused'),
+    ('Thermal and a Quarter',       'The Queue',                         'focused'),
+    ('Neon Jungle',                 'Bravado',                           'focused'),
+    ('Ludovico Einaudi',            'Experience',                        'focused'),
+    ('Hans Zimmer',                 'Time',                              'focused'),
+    ('Yann Tiersen',                'Comptine d un autre ete',           'focused'),
+    ('Harshdeep Kaur',              'Maahi Ve',                          'focused'),
+    ('Shankar Mahadevan',           'Breathless',                        'focused'),
+    ('Pt. Ravi Shankar',            'Raga Jog',                          'focused'),
+    ('Zakir Hussain',               'Kirwani',                           'focused'),
+    ('Anoushka Shankar',            'Land of Gold',                      'focused'),
+    ('Niladri Kumar',               'Zitar',                             'focused'),
+    ('Rabbi Shergill',              'Bulla Ki Jaana',                    'focused'),
+    ('Kailash Kher',                'Teri Deewani',                      'focused'),
+    ('Ustad Nusrat Fateh Ali Khan', 'Tumhe Dillagi',                     'focused'),
+    ('Abida Parveen',               'Tere Ishq Nachaya',                 'focused'),
+    ('Hariharan',                   'Allah Ke Bande',                    'focused'),
+    # ── Chill ──
+    ('Tame Impala',                 'The Less I Know The Better',        'chill'),
+    ('Mac DeMarco',                 'Chamber of Reflection',             'chill'),
+    ('Rex Orange County',           'Loving is Easy',                    'chill'),
+    ('Khruangbin',                  'A La Sala',                         'chill'),
+    ('Still Woozy',                 'Goodie Bag',                        'chill'),
+    ('Mild High Club',              'Windowpane',                        'chill'),
+    ('Men I Trust',                 'Tailwhip',                          'chill'),
+    ('Cigarettes After Sex',        'Apocalypse',                        'chill'),
+    ('Beach House',                 'Space Song',                        'chill'),
+    ('SALES',                       'Pope Is a Rockstar',                'chill'),
+    ('Chet Faker',                  'Gold',                              'chill'),
+    ('Petit Biscuit',               'Sunset Lover',                      'chill'),
+    ('Pretty Boy Aaron',            'Feelings',                          'chill'),
+    ('Whitney',                     'No Woman',                          'chill'),
+    ('Big Thief',                   'Not',                               'chill'),
+    ('Soccer Mommy',                'Circle the Drain',                  'chill'),
+    ('Snail Mail',                  'Pristine',                          'chill'),
+    ('Clairo',                      'Pretty Girl',                       'chill'),
+    ('Lomelda',                     'Interstate Vision',                 'chill'),
+    ('Hand Habits',                 'wildfire',                          'chill'),
+    ('Pinegrove',                   'Old Friends',                       'chill'),
+    ('Hovvdy',                      'Easy',                              'chill'),
+    ('Squirrel Flower',             'I Was Born Swimming',               'chill'),
+    ('Bedouine',                    'Solitary Daughter',                 'chill'),
+    ('Ritviz',                      'Udd Gaye',                          'chill'),
+    ('AP Dhillon',                  'With You',                          'chill'),
+    ('Karan Aujla',                 'Softly',                            'chill'),
+    ('Arijit Singh',                'Tum Hi Ho',                         'chill'),
+    ('Lucky Ali',                   'O Sanam',                           'chill'),
+    ('Mohit Chauhan',               'Tum Se Hi',                         'chill'),
+    ('Papon',                       'Moh Moh Ke Dhaage',                 'chill'),
+    ('Shafqat Amanat Ali',          'Teri Ore',                          'chill'),
+    ('Atif Aslam',                  'Woh Lamhe',                         'chill'),
+    ('Sonu Nigam',                  'Kal Ho Naa Ho',                     'chill'),
+    ('KK',                          'Zindagi Do Pal Ki',                 'chill'),
+    ('Lata Mangeshkar',             'Lag Jaa Gale',                      'chill'),
+    ('Kishore Kumar',               'Roop Tera Mastana',                 'chill'),
+    ('Mohammed Rafi',               'Baharon Phool Barsao',              'chill'),
+    ('Mukesh',                      'Kabhi Kabhi Mere Dil Mein',         'chill'),
+    ('Hemant Kumar',                'Na Tum Hamen Jano',                 'chill'),
+    ('S.D. Burman',                 'Tere Mere Sapne',                   'chill'),
+    ('Manna Dey',                   'Ae Bhai Zara Dekh Ke Chalo',        'chill'),
+    ('Talat Mahmood',               'Jalte Hain Jiske Liye',             'chill'),
+    ('Asha Bhosle',                 'Dum Maro Dum',                      'chill'),
+    ('Geeta Dutt',                  'Waqt Ne Kiya',                      'chill'),
+    ('Noor Jehan',                  'Awaz De Kahan Hai',                 'chill'),
+    ('Mehdi Hassan',                'Ranjish Hi Sahi',                   'chill'),
+    ('Ghulam Ali',                  'Chupke Chupke',                     'chill'),
+    ('Jagjit Singh',                'Tum Itna Jo Muskura Rahe Ho',       'chill'),
+    ('Pankaj Udhas',                'Chitthi Aayi Hai',                  'chill'),
+    ('Anup Jalota',                 'Hari Om Hari',                      'chill'),
+    ('Hariharan',                   'Dil Ki Baatein',                    'chill'),
+    # ── Emotional ──
+    ('Novo Amor',                   'Anchor',                            'emotional'),
+    ('Bon Iver',                    'Holocene',                          'emotional'),
+    ('Phoebe Bridgers',             'Savior Complex',                    'emotional'),
+    ('Sufjan Stevens',              'Death With Dignity',                'emotional'),
+    ('Daughter',                    'Youth',                             'emotional'),
+    ('Iron & Wine',                 'Flightless Bird',                   'emotional'),
+    ('Gregory Alan Isakov',         'The Stable Song',                   'emotional'),
+    ('Adrianne Lenker',             'anything',                          'emotional'),
+    ('Nick Drake',                  'Pink Moon',                         'emotional'),
+    ('Elliott Smith',               'Between the Bars',                  'emotional'),
+    ('Conor Oberst',                'Lua',                               'emotional'),
+    ('Mount Eerie',                 'Real Death',                        'emotional'),
+    ('Car Seat Headrest',           'Drunk Drivers',                     'emotional'),
+    ('Mitski',                      'Nobody',                            'emotional'),
+    ('Soccer Mommy',                'Your Dog',                          'emotional'),
+    ('Snail Mail',                  'Heat Wave',                         'emotional'),
+    ('Lucy Dacus',                  'Night Shift',                       'emotional'),
+    ('Julien Baker',                'Sprained Ankle',                    'emotional'),
+    ('boygenius',                   'Bite the Hand',                     'emotional'),
+    ('The National',                'Bloodbuzz Ohio',                    'emotional'),
+    ('Frightened Rabbit',           'Modern Leper',                      'emotional'),
+    ('Bright Eyes',                 'First Day of My Life',              'emotional'),
+    ('Death Cab for Cutie',         'I Will Follow You into the Dark',   'emotional'),
+    ('The Antlers',                 'Hospice',                           'emotional'),
+    ('Owen',                        'Bad News',                          'emotional'),
+    ('Arijit Singh',                'Channa Mereya',                     'emotional'),
+    ('KK',                          'Yaaron',                            'emotional'),
+    ('Jubin Nautiyal',              'Tere Liye',                         'emotional'),
+    ('Shreya Ghoshal',              'Sun Raha Hai',                      'emotional'),
+    ('Sonu Nigam',                  'Dil Ne Yeh Kaha Hai',               'emotional'),
+    ('Atif Aslam',                  'Doorie',                            'emotional'),
+    ('Rahat Fateh Ali Khan',        'O Re Piya',                         'emotional'),
+    ('Lata Mangeshkar',             'Ajeeb Dastan Hai Yeh',              'emotional'),
+    ('Mohammed Rafi',               'Kya Hua Tera Wada',                 'emotional'),
+    ('Kishore Kumar',               'Mere Mehboob Qayamat Hogi',         'emotional'),
+    ('Mukesh',                      'Jeena Yahan Marna Yahan',           'emotional'),
+    ('Talat Mahmood',               'Ae Mere Dil Kahin Aur Chal',        'emotional'),
+    ('Jagjit Singh',                'Hothon Se Chhu Lo Tum',             'emotional'),
+    ('Mehdi Hassan',                'Zindagi Mein To Sabhi Pyar Kiya Karte Hain', 'emotional'),
+    ('Ghulam Ali',                  'Hungama Hai Kyun Barpa',            'emotional'),
+    ('Farida Khanum',               'Aaj Jaane Ki Zid Na Karo',          'emotional'),
+    ('Nusrat Fateh Ali Khan',       'Afreen Afreen',                     'emotional'),
+    ('Abida Parveen',               'Tu Jhoom',                          'emotional'),
+    ('Shafqat Amanat Ali',          'Mann Mayal',                        'emotional'),
+    ('Kailash Kher',                'Saiyyan',                           'emotional'),
+    ('Hariharan',                   'Kal Ho Naa Ho',                     'emotional'),
+    ('Shankar Mahadevan',           'Tanha Dil',                         'emotional'),
+    ('A.R. Rahman',                 'Roja Jaaneman',                     'emotional'),
+    ('Ilaiyaraaja',                 'En Iniya Pon Nilave',               'emotional'),
+    ('S.P. Balasubrahmanyam',       'Ye Dil Deewana',                    'emotional'),
+    ('Neha Kakkar',                 'O Humsafar',                        'emotional'),
+    ('Darshan Raval',               'Tera Zikr',                         'emotional'),
+    ('Jubin Nautiyal',              'Lut Gaye',                          'emotional'),
 ]
 
-def _prewarm_one(artist, track):
+def _prewarm_one(artist, track, mood):
     key = f'{artist}||{track}'
     if _cache_get(key):
+        _mood_index_add(mood, key)
         return
     url = _itunes_preview(artist, track)
     if url:
         _cache_set(key, url)
-        print(f'[prewarm] ✓ {artist} — {track}')
+        _mood_index_add(mood, key)
+        print(f'[prewarm] ✓ {artist} — {track} [{mood}]')
     else:
         print(f'[prewarm] ✗ {artist} — {track} (no iTunes preview)')
 
 def _start_prewarm():
     def run():
-        for artist, track in WARMUP_POOL:
-            _prewarm_one(artist, track)
+        for artist, track, mood in WARMUP_POOL:
+            _prewarm_one(artist, track, mood)
             time.sleep(3)
     threading.Thread(target=run, daemon=True).start()
 
@@ -294,7 +307,29 @@ def _start_prewarm():
 def health():
     with _cache_lock:
         n = len(_cache)
-    return jsonify({'status': 'ok', 'service': 'vibe-engine-api', 'cached_entries': n, 'moods_ready': n >= 4})
+    with _mood_index_lock:
+        mood_counts = {m: len(keys) for m, keys in _mood_index.items()}
+    return jsonify({'status': 'ok', 'service': 'vibe-engine-api', 'cached_entries': n, 'moods_ready': n >= 4, 'mood_counts': mood_counts})
+
+
+@app.route('/api/mood')
+def mood_tracks():
+    mood = request.args.get('mood', '').strip().lower()
+    if mood not in _mood_index:
+        return jsonify({'error': f'mood must be one of: {", ".join(_mood_index)}'}), 400
+
+    with _mood_index_lock:
+        keys = list(_mood_index[mood])
+
+    cached = []
+    for key in keys:
+        url = _cache_get(key)
+        if url:
+            artist, track = key.split('||', 1)
+            cached.append({'artist': artist, 'track': track, 'previewUrl': url})
+
+    random.shuffle(cached)
+    return jsonify({'mood': mood, 'tracks': cached[:10]})
 
 
 @app.route('/api/preview')
