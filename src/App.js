@@ -463,7 +463,7 @@ function useAudioPlayer() {
     on('ended',          () => { setPlaying(false); setEnded(true); currentKeyRef.current = null; });
     on('waiting',        () => setLoading(true));
     on('canplay',        () => setLoading(false));
-    on('error',          () => { setError(true); setLoading(false); setPlaying(false); });
+    on('error',          () => { setError(true); setLoading(false); setPlaying(false); currentKeyRef.current = null; });
     on('timeupdate',     () => setCurrentTime(audio.currentTime));
     on('loadedmetadata', () => setDuration(isFinite(audio.duration) ? audio.duration : 0));
     return () => {
@@ -760,13 +760,24 @@ function DiscoveryScreen({ mood, activity, skips, onSkip, onNudgeAccept, followe
     setLiked(false); setAnimDir('in'); setShowNudge(false);
   }, [mood.id]);
 
-  // Stop audio on card change
-  const stopFn = yt.stop;
-  useEffect(() => { stopFn(); }, [idx, stopFn]);
+  const autoAdvancingRef = useRef(false);
 
-  // Auto-advance to next card when song finishes naturally
+  // Stop on manual card change, or auto-play when song ended naturally
+  const stopFn   = yt.stop;
+  const toggleFn = yt.toggle;
+  useEffect(() => {
+    if (autoAdvancingRef.current) {
+      autoAdvancingRef.current = false;
+      toggleFn(card.artist, card.track);
+    } else {
+      stopFn();
+    }
+  }, [idx, card.artist, card.track, stopFn, toggleFn]);
+
+  // Auto-advance + auto-play next card when song finishes naturally
   useEffect(() => {
     if (!yt.ended) return;
+    autoAdvancingRef.current = true;
     setAnimDir('out');
     const t = setTimeout(() => { setIdx(i => i + 1); setLiked(false); setAnimDir('in'); }, 320);
     return () => clearTimeout(t);
@@ -900,12 +911,12 @@ function DiscoveryScreen({ mood, activity, skips, onSkip, onNudgeAccept, followe
                 </div>
                 <button
                   className={`play-circle${yt.playing ? ' play-circle-glow' : ''}${yt.error ? ' play-circle-err' : ''}`}
-                  style={{ background: yt.error ? '#3a3a3a' : mood.color, '--mood-color': mood.color }}
+                  style={{ background: mood.color, '--mood-color': mood.color }}
                   onClick={() => yt.toggle(card.artist, card.track)}
                   disabled={yt.loading}
                   title={yt.error ? 'Audio unavailable — is the backend running?' : undefined}
                 >
-                  {yt.loading ? <span className="spin-ring" /> : yt.error ? '✕' : yt.playing ? '⏸' : '▶'}
+                  {yt.loading ? <span className="spin-ring" /> : yt.playing ? '⏸' : '▶'}
                 </button>
               </div>
               <div
