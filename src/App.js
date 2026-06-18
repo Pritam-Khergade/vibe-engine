@@ -450,6 +450,7 @@ function useAudioPlayer() {
   const [playing,     setPlaying]     = useState(false);
   const [loading,     setLoading]     = useState(false);
   const [error,       setError]       = useState(false);
+  const [ended,       setEnded]       = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration,    setDuration]    = useState(0);
 
@@ -459,7 +460,7 @@ function useAudioPlayer() {
     const on = (ev, fn) => audio.addEventListener(ev, fn);
     on('playing',        () => { setPlaying(true); setLoading(false); setError(false); });
     on('pause',          () => setPlaying(false));
-    on('ended',          () => { setPlaying(false); currentKeyRef.current = null; });
+    on('ended',          () => { setPlaying(false); setEnded(true); currentKeyRef.current = null; });
     on('waiting',        () => setLoading(true));
     on('canplay',        () => setLoading(false));
     on('error',          () => { setError(true); setLoading(false); setPlaying(false); });
@@ -477,7 +478,7 @@ function useAudioPlayer() {
     const audio = audioRef.current;
     if (audio) { audio.pause(); audio.src = ''; }
     currentKeyRef.current = null;
-    setPlaying(false); setLoading(false); setError(false);
+    setPlaying(false); setLoading(false); setError(false); setEnded(false);
     setCurrentTime(0); setDuration(0);
   }, []);
 
@@ -498,7 +499,7 @@ function useAudioPlayer() {
       return;
     }
     clearTimeout(previewTimer.current);
-    setError(false); setLoading(true);
+    setError(false); setLoading(true); setEnded(false);
     setCurrentTime(0); setDuration(0);
     audio.pause();
     const url = `${API}/api/preview?artist=${encodeURIComponent(artist)}&track=${encodeURIComponent(track)}`;
@@ -512,7 +513,7 @@ function useAudioPlayer() {
   }, []);
 
   const progress = duration > 0 ? currentTime / duration : 0;
-  return { toggle, stop, seek, playing, loading, error, currentTime, duration, progress, ready: true, ytBlocked: error };
+  return { toggle, stop, seek, playing, loading, error, ended, currentTime, duration, progress, ready: true, ytBlocked: error };
 }
 
 // ─── SpotifyIcon ──────────────────────────────────────────────────────────────
@@ -762,6 +763,14 @@ function DiscoveryScreen({ mood, activity, skips, onSkip, onNudgeAccept, followe
   // Stop audio on card change
   const stopFn = yt.stop;
   useEffect(() => { stopFn(); }, [idx, stopFn]);
+
+  // Auto-advance to next card when song finishes naturally
+  useEffect(() => {
+    if (!yt.ended) return;
+    setAnimDir('out');
+    const t = setTimeout(() => { setIdx(i => i + 1); setLiked(false); setAnimDir('in'); }, 320);
+    return () => clearTimeout(t);
+  }, [yt.ended]);
 
   // Nudge after 3 skips
   useEffect(() => { if (skips >= 3) setShowNudge(true); }, [skips]);
