@@ -1387,6 +1387,19 @@ button { cursor: pointer; font-family: var(--font); }
   font-weight: 700;
   color: var(--mood-color, #1db954);
 }
+.signals-list {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255,255,255,0.06);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.signal-item {
+  font-size: 11px;
+  color: #aaa;
+  padding: 3px 0;
+}
 
 /* ─── PHASE 2: RESEARCH SCREEN ───────────────────────────────────────────────── */
 .research-screen { padding: 8px 0 20px; }
@@ -1549,3 +1562,66 @@ button { cursor: pointer; font-family: var(--font); }
   transition: background 0.15s, color 0.15s;
 }
 .test-play:disabled { opacity: 0.4; cursor: default; }
+
+/* ─── API LOADING / SKELETON ──────────────────────────────────────────────────── */
+@keyframes shimmer {
+  0%   { background-position: -400px 0; }
+  100% { background-position:  400px 0; }
+}
+.api-loading-container { padding: 8px 0; }
+.skeleton-card {
+  display: flex; align-items: center; gap: 14px;
+  background: var(--bg2, #1a1a1a); border-radius: 14px;
+  padding: 14px 16px; margin-bottom: 10px;
+}
+.skeleton-vinyl {
+  width: 52px; height: 52px; border-radius: 50%; flex-shrink: 0;
+  background: linear-gradient(90deg, #1e1e1e 25%, #2a2a2a 50%, #1e1e1e 75%);
+  background-size: 400px 100%;
+  animation: shimmer 1.4s infinite linear;
+}
+.skeleton-body { flex: 1; }
+.skeleton-line {
+  height: 10px; border-radius: 6px;
+  background: linear-gradient(90deg, #1e1e1e 25%, #2a2a2a 50%, #1e1e1e 75%);
+  background-size: 400px 100%;
+  animation: shimmer 1.4s infinite linear;
+}
+.waking-banner {
+  display: flex; align-items: center; gap: 8px;
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  border-radius: 10px; padding: 10px 14px;
+  font-size: 12px; color: #F59E0B; margin-bottom: 14px;
+}
+.spin-ring-sm {
+  width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0;
+  border: 2px solid rgba(245,158,11,0.3);
+  border-top-color: #F59E0B;
+  animation: spin 0.8s linear infinite;
+}
+
+/* ─── API ERROR BANNER ────────────────────────────────────────────────────────── */
+.api-error-banner {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  background: rgba(239,68,68,0.1);
+  border: 1px solid rgba(239,68,68,0.3);
+  border-radius: 10px; padding: 10px 14px;
+  margin-bottom: 12px;
+}
+.api-error-text { font-size: 12px; color: #FCA5A5; flex: 1; }
+.api-retry-btn {
+  font-size: 11px; font-weight: 700; padding: 5px 12px;
+  border-radius: 20px; border: 1.5px solid; background: transparent;
+  cursor: pointer; white-space: nowrap;
+  transition: background 0.15s;
+}
+.api-retry-btn:hover { background: rgba(255,255,255,0.06); }
+
+/* ─── 30s PREVIEW BADGE ─────────────────────────────────────────────────────── */
+.preview-badge {
+  display: inline-block; font-size: 10px; font-weight: 700;
+  padding: 2px 7px; border-radius: 10px; margin-top: 4px;
+  background: rgba(29,185,84,0.15); color: #1DB954;
+  border: 1px solid rgba(29,185,84,0.3);
+}

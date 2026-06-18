@@ -1,5 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import './App.css';
+import { STATS } from './data/stats';
+import { useSession, MOOD_BASELINE } from './context/SessionContext';
+import { fetchTracksByMood, MOOD_GENRE_WEIGHTS } from './services/vibeApi';
 
 // ─── API + HELPERS ────────────────────────────────────────────────────────────
 
@@ -428,9 +431,9 @@ const FINDINGS = [
 ];
 
 const RESEARCH_CARDS = [
-  { num: '01', stat: '82%',    finding: 'of surveyed users feel stuck hearing the same songs every session', feature: 'Mood Intent Declaration',       desc: 'Declare your emotional state before the algorithm makes a single decision' },
-  { num: '02', stat: '24%',    finding: 'only understand why a song was recommended to them',               feature: 'Contextual Explanation Card',    desc: 'Every track gets a plain-language reason that changes per mood and activity' },
-  { num: '03', stat: '76%',    finding: 'would try new music if the app explained mood context before they commit', feature: '✦ AI-matched badge + sub-scores', desc: 'Mood fit, Energy fit, Freshness — three signals that make the match credible' },
+  { num: '01', stat: STATS.STUCK_IN_LOOP,    finding: 'of surveyed users feel stuck hearing the same songs every session', feature: 'Mood Intent Declaration',       desc: 'Declare your emotional state before the algorithm makes a single decision' },
+  { num: '02', stat: STATS.UNDERSTAND_WHY,   finding: 'only understand why a song was recommended to them',               feature: 'Contextual Explanation Card',    desc: 'Every track gets a plain-language reason that changes per mood and activity' },
+  { num: '03', stat: STATS.TRY_WITH_CONTEXT, finding: 'would try new music if the app explained mood context before they commit', feature: '✦ AI-matched badge + sub-scores', desc: 'Mood fit, Energy fit, Freshness — three signals that make the match credible' },
   { num: '04', stat: '53%',    finding: 'say finding new music takes too much effort — it requires active navigation', feature: 'Activity Context Selector',   desc: 'Mood + activity = full context in 2 taps. Zero navigation required.' },
   { num: '05', stat: '6.8%',   finding: 'of all reviews contain explicit churn signals — leaving after years of loyalty', feature: 'Bubble Breaker Mode',        desc: 'Explicit toggle to break the genre loop before the algorithm traps you in it' },
   { num: '06', stat: '3.12/5', finding: 'average recommendation satisfaction — mediocre trust in the algorithm', feature: 'Session Feedback Loop',       desc: 'Every skip and follow visibly teaches the model this session — not next week' },
@@ -490,7 +493,7 @@ function useAudioPlayer() {
     if (audioRef.current && isFinite(time)) audioRef.current.currentTime = time;
   }, []);
 
-  const toggle = useCallback(async (artist, track) => {
+  const toggle = useCallback(async (artist, track, previewUrl = null) => {
     const audio = audioRef.current;
     if (!audio) return;
     const key = `${artist}||${track}`;
@@ -506,7 +509,7 @@ function useAudioPlayer() {
     setError(false); setLoading(true); setEnded(false);
     setCurrentTime(0); setDuration(0);
     audio.pause();
-    const url = `${API}/api/preview?artist=${encodeURIComponent(artist)}&track=${encodeURIComponent(track)}`;
+    const url = previewUrl || `${API}/api/preview?artist=${encodeURIComponent(artist)}&track=${encodeURIComponent(track)}`;
     audio.src = url;
     currentKeyRef.current = key;
     audio.addEventListener('loadedmetadata', () => {
@@ -699,6 +702,31 @@ function MoodSelector({ onMoodSelect }) {
   );
 }
 
+// ─── API Loading Skeleton ─────────────────────────────────────────────────────
+
+function ApiLoadingState({ wakingUp, moodColor }) {
+  return (
+    <div className="api-loading-container">
+      {wakingUp && (
+        <div className="waking-banner">
+          <span className="spin-ring-sm" />
+          <span>Waking up the AI engine… first load takes ~15s</span>
+        </div>
+      )}
+      {[1, 2, 3].map(i => (
+        <div key={i} className="skeleton-card">
+          <div className="skeleton-vinyl" style={{ '--mood-color': moodColor }} />
+          <div className="skeleton-body">
+            <div className="skeleton-line" style={{ width: '70%' }} />
+            <div className="skeleton-line" style={{ width: '45%', marginTop: 8 }} />
+            <div className="skeleton-line" style={{ width: '30%', marginTop: 8 }} />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ─── SCREEN 2: Discovery ──────────────────────────────────────────────────────
 
 const MOOD_ENERGY_LABEL = {
@@ -708,7 +736,8 @@ const MOOD_ENERGY_LABEL = {
   Emotional: 'heavy',
 };
 
-function DiscoveryScreen({ mood, activity, skips, onSkip, onNudgeAccept, followed, onFollow, yt, bubbleBreaker, sessionSignals }) {
+function DiscoveryScreen({ mood, activity, skips, onSkip, onNudgeAccept, followed, onFollow, yt, bubbleBreaker }) {
+  const session = useSession();
   const [idx,              setIdx]              = useState(() => Math.floor(Math.random() * (DISCOVERY_DATA[mood.id]?.length || 50)));
   const [liked,            setLiked]            = useState(false);
   const [animDir,          setAnimDir]          = useState('in');
@@ -717,9 +746,15 @@ function DiscoveryScreen({ mood, activity, skips, onSkip, onNudgeAccept, followe
   const [explanationFresh, setExplanationFresh] = useState(false);
   const [toast,            setToast]            = useState(null);
   const [barsReady,        setBarsReady]        = useState(false);
+  const [apiTracks,        setApiTracks]        = useState([]);
+  const [apiLoading,       setApiLoading]       = useState(true);
+  const [apiError,         setApiError]         = useState(false);
+  const [wakingUp,         setWakingUp]         = useState(false);
+  const [fetchKey,         setFetchKey]         = useState(0);
 
-  const artists  = DISCOVERY_DATA[mood.id] || DISCOVERY_DATA.chill;
-  const card     = artists[idx % artists.length];
+  // Prefer API tracks; fall back to static pool
+  const tracks   = apiTracks.length > 0 ? apiTracks : (DISCOVERY_DATA[mood.id] || DISCOVERY_DATA.chill);
+  const card     = tracks[idx % tracks.length];
   const nextMood = MOODS.find(m => m.id === NEXT_MOOD_ID[mood.id]);
   const score    = getMatchScore(card.artist, mood.label);
 
@@ -728,7 +763,7 @@ function DiscoveryScreen({ mood, activity, skips, onSkip, onNudgeAccept, followe
 
   // Session counter text — always visible
   const sessionText = (() => {
-    const n = sessionSignals || 0;
+    const n = session.interactions.length;
     const base = `Your ${mood.label} taste: ${n} signal${n !== 1 ? 's' : ''}`;
     let suffix = null;
     if (n >= 8)      suffix = `highly tuned ✦`;
@@ -764,6 +799,35 @@ function DiscoveryScreen({ mood, activity, skips, onSkip, onNudgeAccept, followe
     setLiked(false); setAnimDir('in'); setShowNudge(false);
   }, [mood.id]);
 
+  // Fetch live tracks from HF Space — retries via fetchKey
+  useEffect(() => {
+    let cancelled = false;
+    setApiLoading(true);
+    setApiError(false);
+    setWakingUp(false);
+    const wakingTimer = setTimeout(() => { if (!cancelled) setWakingUp(true); }, 3000);
+
+    fetchTracksByMood(mood.label)
+      .then(tracks => {
+        if (!cancelled) {
+          clearTimeout(wakingTimer);
+          setApiTracks(tracks);
+          setApiLoading(false);
+          setWakingUp(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          clearTimeout(wakingTimer);
+          setApiError(true);
+          setApiLoading(false);
+          setWakingUp(false);
+        }
+      });
+
+    return () => { cancelled = true; clearTimeout(wakingTimer); };
+  }, [mood.id, mood.label, fetchKey]); // eslint-disable-line
+
   const autoAdvancingRef = useRef(false);
 
   // Stop on manual card change, or auto-play when song ended naturally
@@ -772,11 +836,11 @@ function DiscoveryScreen({ mood, activity, skips, onSkip, onNudgeAccept, followe
   useEffect(() => {
     if (autoAdvancingRef.current) {
       autoAdvancingRef.current = false;
-      toggleFn(card.artist, card.track);
+      toggleFn(card.artist, card.track, card.previewUrl);
     } else {
       stopFn();
     }
-  }, [idx, card.artist, card.track, stopFn, toggleFn]);
+  }, [idx, card.artist, card.track, card.previewUrl, stopFn, toggleFn]);
 
   // Auto-advance + auto-play next card when song finishes naturally
   useEffect(() => {
@@ -802,6 +866,7 @@ function DiscoveryScreen({ mood, activity, skips, onSkip, onNudgeAccept, followe
 
   const handleSkip = () => {
     showToast(`Got it — less ${MOOD_ENERGY_LABEL[mood.label] || 'this'} energy in future sessions`);
+    session.skipTrack({ ...card, genreWeights: MOOD_GENRE_WEIGHTS[mood.id] });
     changeCard(onSkip);
   };
 
@@ -809,6 +874,7 @@ function DiscoveryScreen({ mood, activity, skips, onSkip, onNudgeAccept, followe
     if (liked) return;
     setLiked(true);
     onFollow(card.artist);
+    session.likeTrack({ ...card, genreWeights: MOOD_GENRE_WEIGHTS[mood.id] });
     showToast(`Added to your ${mood.label} taste profile ✓`, 'follow');
     setTimeout(() => changeCard(), 700);
   };
@@ -836,8 +902,20 @@ function DiscoveryScreen({ mood, activity, skips, onSkip, onNudgeAccept, followe
           onAccept={() => { setShowNudge(false); yt.stop(); onNudgeAccept(nextMood); }}
           onDismiss={() => setShowNudge(false)}
         />
+      ) : apiLoading ? (
+        <ApiLoadingState wakingUp={wakingUp} moodColor={mood.color} />
       ) : (
         <>
+          {apiError && apiTracks.length === 0 && (
+            <div className="api-error-banner">
+              <span className="api-error-text">Couldn't reach AI engine · showing offline library</span>
+              <button
+                className="api-retry-btn"
+                style={{ color: mood.color, borderColor: mood.color }}
+                onClick={() => setFetchKey(k => k + 1)}
+              >Retry</button>
+            </div>
+          )}
           <div className={`disc-card${animDir === 'out' ? ' card-out' : ' card-in'}`}>
 
             {/* Session counter — first element inside card */}
@@ -857,8 +935,9 @@ function DiscoveryScreen({ mood, activity, skips, onSkip, onNudgeAccept, followe
                 <h2 className="card-artist">{card.artist}</h2>
                 <p className="artist-disclaimer">✓ Real artist · AI-matched to your vibe</p>
                 {bubbleBreaker && <p className="bubble-banner">✦ Outside your usual genres</p>}
-                <p className="card-genre">{card.genre}</p>
-                <p className="card-listeners">🎧 {card.listeners} monthly listeners</p>
+                <p className="card-genre">{card.genre || '✦ AI-matched'}</p>
+                {card.listeners && <p className="card-listeners">🎧 {card.listeners} monthly listeners</p>}
+                {card._fromApi && <span className="preview-badge">30s preview</span>}
 
                 {/* Match Breakdown Panel */}
                 <div className="match-breakdown">
@@ -916,7 +995,7 @@ function DiscoveryScreen({ mood, activity, skips, onSkip, onNudgeAccept, followe
                 <button
                   className={`play-circle${yt.playing ? ' play-circle-glow' : ''}${yt.error ? ' play-circle-err' : ''}`}
                   style={{ background: mood.color, '--mood-color': mood.color }}
-                  onClick={() => yt.toggle(card.artist, card.track)}
+                  onClick={() => yt.toggle(card.artist, card.track, card.previewUrl)}
                   disabled={yt.loading}
                   title={yt.error ? 'Audio unavailable — is the backend running?' : undefined}
                 >
@@ -1000,149 +1079,40 @@ function CuriosityNudge({ mood, nextMood, onAccept, onDismiss }) {
   );
 }
 
-// ─── SCREEN 3: Workflow ───────────────────────────────────────────────────────
-
-function WorkflowScreen() {
-  const [step,            setStep]            = useState(-1);
-  const [findingsVisible, setFindingsVisible] = useState(0);
-  const running = step > -1 && step < SOURCES.length + 2;
-  const done    = step >= SOURCES.length + 2;
-
-  const runWorkflow = () => {
-    if (step !== -1) return;
-    SOURCES.forEach((_, i) => setTimeout(() => setStep(i), i * 700));
-    const afterSources = SOURCES.length * 700;
-    setTimeout(() => setStep(SOURCES.length), afterSources);
-    FINDINGS.forEach((_, i) => setTimeout(() => setFindingsVisible(i + 1), afterSources + 500 + i * 500));
-    setTimeout(() => setStep(SOURCES.length + 2), afterSources + 500 + FINDINGS.length * 500 + 300);
-  };
-
-  const enginePulsing = step === SOURCES.length && !done;
-
-  return (
-    <div className="workflow-screen">
-      <p className="eyebrow">PART 1 · AI REVIEW ANALYSIS</p>
-      <h2 className="screen-title">Review Analysis Workflow</h2>
-      <p className="screen-sub">1,066 reviews · 2 platforms · June 2026</p>
-      <p className="screen-sub" style={{ fontSize: '10px', marginTop: '-6px', opacity: 0.5 }}>(Pipeline architecture demo · real analysis: 1,066 reviews)</p>
-
-      <div className="wf-pipeline">
-        <div className="wf-col">
-          <p className="wf-col-label">DATA SOURCES</p>
-          {SOURCES.map((s, i) => (
-            <div key={i} className={`wf-source${step >= i ? ' wf-source-active' : ''}`} style={{ '--src-color': s.color }}>
-              <span className="wf-source-name">{s.name}</span>
-              <span className="wf-source-count">{s.count}</span>
-            </div>
-          ))}
-        </div>
-
-        <div className="wf-center">
-          <div className={`wf-vline${step >= 0 ? ' wf-vline-active' : ''}`}>
-            {running && <div className="wf-flow-dot" />}
-          </div>
-          <div className={`wf-engine${enginePulsing ? ' wf-engine-pulse' : ''}${done ? ' wf-engine-done' : ''}`}>
-            <span className="wf-engine-icon">✦</span>
-            <p className="wf-engine-name">Claude AI</p>
-            <p className="wf-engine-sub">n8n Workflow</p>
-          </div>
-          <div className={`wf-vline${done ? ' wf-vline-active' : ''}`} />
-        </div>
-
-        <div className="wf-col">
-          <p className="wf-col-label">KEY FINDINGS</p>
-          {FINDINGS.map((f, i) => (
-            <div key={i} className={`wf-finding${findingsVisible > i ? ' wf-finding-show' : ''}`} style={{ '--fc': f.color }}>
-              <span className="wf-finding-src" style={{ color: f.color }}>{f.src}</span>
-              <p className="wf-finding-text">{f.text}</p>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <button className="run-btn" onClick={runWorkflow} disabled={running || done}>
-        {running ? '⟳  Analyzing...' : done ? '✓  Analysis Complete' : '▶  Run Workflow Demo'}
-      </button>
-
-      {done && (
-        <>
-          <div className="result-grid">
-            {[['1,066','Reviews'],['2','Platforms'],['4','Root Causes'],['Jun 2026','Period']].map(([n,l]) => (
-              <div key={l} className="result-card">
-                <span className="result-num">{n}</span>
-                <span className="result-lbl">{l}</span>
-              </div>
-            ))}
-          </div>
-
-          <div className="top-findings-card">
-            <p className="top-findings-title">Top Findings</p>
-            {[
-              { pct: '41%', color: '#1DB954', text: 'Discovery feels accidental — users want intentional triggers' },
-              { pct: '33%', color: '#8B5CF6', text: 'Mood ≠ genre: users want emotion-based recommendations' },
-              { pct: '67%', color: '#F59E0B', text: "Users don't know WHY a track was recommended" },
-            ].map(r => (
-              <div key={r.text} className="finding-stat-row">
-                <span className="finding-stat-pct" style={{ color: r.color }}>{r.pct}</span>
-                <span className="finding-stat-text">{r.text}</span>
-              </div>
-            ))}
-          </div>
-
-          <h3 className="screen-title" style={{ fontSize: '18px', marginTop: '8px', marginBottom: '6px' }}>What the AI Actually Found</h3>
-          <p className="screen-sub" style={{ marginBottom: '12px' }}>Real insights from 1,066 Spotify reviews analyzed</p>
-
-          <div className="insight-cards">
-            <div className="insight-card red">
-              <p className="insight-tag">Top Pain Point</p>
-              <p className="insight-stat">82% of users</p>
-              <p className="insight-finding">Feel stuck hearing the same songs every session despite wanting to discover something new</p>
-              <p className="insight-quote">"Paying $12.99 a month just to hear the same playlist no matter how many times I shuffle it"</p>
-            </div>
-            <div className="insight-card yellow">
-              <p className="insight-tag">Top Opportunity</p>
-              <p className="insight-stat">76% of users</p>
-              <p className="insight-finding">Would try new music if the app explained WHY it fits their current mood first</p>
-              <p className="insight-quote">"Like ecommerce — if you liked this you might also like this"</p>
-            </div>
-            <div className="insight-card green">
-              <p className="insight-tag">Validated Solution</p>
-              <p className="insight-stat">1 tap vs 3 steps</p>
-              <p className="insight-finding">Mood declaration reduces discovery from search → browse → play to a single intent</p>
-              <p className="insight-quote">"A section like YouTube Music Shorts — discover through snippets before committing"</p>
-            </div>
-          </div>
-
-          <p className="methodology-line">
-            Pipeline: google-play-scraper + iTunes RSS → 1,066 reviews cleaned → 6 research questions → Vibe Engine features
-          </p>
-        </>
-      )}
-
-      <p className="wf-footer">🔗 Live workflow: n8n + Claude API · Review output linked in deck</p>
-    </div>
-  );
-}
-
 // ─── SCREEN 4: Taste ──────────────────────────────────────────────────────────
 
-function TasteScreen({ mood, followed, sessionSignals, bubbleBreaker }) {
+function TasteScreen({ mood, followed, bubbleBreaker }) {
+  const { genreScores, interactions } = useSession();
+
+  // Build 6-point chart by interpolating mood baseline → live genreScores
+  const baseline = MOOD_BASELINE[mood.id] || MOOD_BASELINE.emotional;
+  const lerp = (a, b, t) => Math.round(a + (b - a) * t);
+  const steps = [0, 0.2, 0.4, 0.6, 0.8, 1.0];
+
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
   const genres = [
-    { name: 'Pop',        values: [85, 80, 72, 65, 55, 48], color: '#EC4899' },
-    { name: 'Indie',      values: [40, 48, 55, 62, 68, 72], color: '#8B5CF6' },
-    { name: 'Electronic', values: [20, 28, 35, 42, 50, 60], color: mood.color },
-    { name: 'Jazz',       values: [5,  8,  12, 18, 25, 35], color: '#06B6D4' },
+    { name: 'Pop',        color: '#EC4899', values: steps.map(t => lerp(baseline.Pop,        genreScores.Pop,        t)) },
+    { name: 'Indie',      color: '#8B5CF6', values: steps.map(t => lerp(baseline.Indie,      genreScores.Indie,      t)) },
+    { name: 'Electronic', color: mood.color, values: steps.map(t => lerp(baseline.Electronic, genreScores.Electronic, t)) },
+    { name: 'Jazz',       color: '#06B6D4', values: steps.map(t => lerp(baseline.Jazz,       genreScores.Jazz,       t)) },
   ];
+
   const px = (i) => 30 + i * (265 / 5);
   const py = (v) => 10 + (1 - v / 100) * 160;
   const gridYPct = [100, 75, 50, 25, 0];
+
+  // Last 5 interactions → signals list
+  const recentSignals = [...interactions].reverse().slice(0, 5);
+
+  // Top genre by live score
+  const topGenre = Object.entries(genreScores).sort((a, b) => b[1] - a[1])[0][0];
+  const likedCount = interactions.filter(i => i.type === 'like').length;
 
   return (
     <div className="taste-screen">
       <p className="eyebrow">PART 4 · TASTE EVOLUTION MAP</p>
       <h2 className="screen-title">Your Taste Evolution</h2>
-      <p className="screen-sub">How your music taste shifted in 2026</p>
+      <p className="screen-sub">Live · updates as you like and skip in Discover</p>
 
       {/* Intelligence Card */}
       <div className="intelligence-card" style={{ '--mood-color': mood.color }}>
@@ -1156,13 +1126,29 @@ function TasteScreen({ mood, followed, sessionSignals, bubbleBreaker }) {
         <div className="intelligence-row">
           <span className="intelligence-icon">⚡</span>
           <span className="intelligence-label">Signals collected</span>
-          <span className="intelligence-value">{sessionSignals || 0} this session</span>
+          <span className="intelligence-value">{interactions.length} this session</span>
         </div>
         <div className="intelligence-row">
           <span className="intelligence-icon">🔮</span>
           <span className="intelligence-label">Discovery mode</span>
           <span className="intelligence-value">{bubbleBreaker ? 'Expanding taste ✦' : 'Refining taste'}</span>
         </div>
+        {recentSignals.length > 0 && (
+          <div className="signals-list">
+            {recentSignals.map((sig, i) => (
+              <div key={i} className="signal-item">
+                {sig.type === 'like' ? '♥' : '⏭'} {sig.type === 'like' ? 'Liked' : 'Skipped'} {sig.track} by {sig.artist}
+              </div>
+            ))}
+          </div>
+        )}
+        {recentSignals.length === 0 && (
+          <div className="signals-list">
+            <div className="signal-item" style={{ color: '#666', fontStyle: 'italic' }}>
+              Like or skip tracks in Discover to see signals here
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="chart-card">
@@ -1197,7 +1183,7 @@ function TasteScreen({ mood, followed, sessionSignals, bubbleBreaker }) {
         {genres.map(g => (
           <div key={g.name} className="legend-item">
             <div className="legend-dot" style={{ background: g.color }} />
-            <span>{g.name}</span>
+            <span>{g.name} <span style={{ color: g.color, fontWeight: 700 }}>{genreScores[g.name]}%</span></span>
           </div>
         ))}
       </div>
@@ -1215,7 +1201,13 @@ function TasteScreen({ mood, followed, sessionSignals, bubbleBreaker }) {
 
       <div className="taste-insight">
         <span className="taste-star">✦</span>
-        <p>You've explored <strong>3 new genres</strong> this year. Your electronic taste grew <strong>+40%</strong> — Vibe Engine found you <strong>8 new artists</strong> in this space.</p>
+        <p>
+          Your <strong style={{ color: mood.color }}>{topGenre}</strong> taste is growing
+          {likedCount > 0
+            ? <> — Vibe Engine found you <strong>{likedCount}</strong> new artist{likedCount !== 1 ? 's' : ''} this session</>
+            : <> — start liking tracks in Discover to build your profile</>
+          }
+        </p>
       </div>
 
       <div className="nsm-card">
@@ -1239,9 +1231,9 @@ function WhyAIScreen({ moodColor }) {
 
       <div className="stat-cards-row">
         {[
-          { num: '82%', label: 'feel stuck in a loop' },
-          { num: '24%', label: 'understand why songs are recommended' },
-          { num: '76%', label: 'would try new music with mood context' },
+          { num: STATS.STUCK_IN_LOOP,    label: 'feel stuck in a loop' },
+          { num: STATS.UNDERSTAND_WHY,   label: 'understand why songs are recommended' },
+          { num: STATS.TRY_WITH_CONTEXT, label: 'would try new music with mood context' },
         ].map(s => (
           <div key={s.num} className="stat-card">
             <div className="stat-number">{s.num}</div>
@@ -1249,13 +1241,13 @@ function WhyAIScreen({ moodColor }) {
           </div>
         ))}
       </div>
-      <p className="source-line">From 1,066 Spotify reviews + 17 user interviews · June 2026</p>
+      <p className="source-line">From {STATS.SOURCE_LINE}</p>
 
       <h2 className="screen-title" style={{ fontSize: '18px', marginTop: '8px' }}>Why Traditional Systems Fail</h2>
       {[
         ['Recommends based on what others like you listened to', 'Starts by asking what YOU need from music right now'],
         ['Gets more conservative over time — same songs forever', 'Expand My Taste mode breaks the bubble on demand'],
-        ['No explanation — feels random to 76% of users', 'Explains every match in plain language before you commit'],
+        [`No explanation — feels random to ${STATS.TRY_WITH_CONTEXT} of users`, 'Explains every match in plain language before you commit'],
       ].map(([trad, ve], i) => (
         <div key={i} className="comparison-row">
           <div className="comparison-cell traditional">
@@ -1319,7 +1311,7 @@ function ResearchScreen({ moodColor }) {
       <p className="eyebrow">PART 3 · RESEARCH EVIDENCE</p>
       <h2 className="screen-title">From Research to Product</h2>
       <p className="screen-sub">Every feature in Vibe Engine is backed by data</p>
-      <p className="source-line">1,066 Spotify reviews + 17 user interviews · June 2026</p>
+      <p className="source-line">{STATS.SOURCE_LINE}</p>
 
       {RESEARCH_CARDS.map(card => (
         <div key={card.num} className="research-card">
@@ -1338,7 +1330,7 @@ function ResearchScreen({ moodColor }) {
           { label: 'Google Play Store', value: 'google-play-scraper Python library' },
           { label: 'Apple App Store',   value: 'iTunes RSS feed (direct API)' },
           { label: 'User Survey',       value: '17 respondents via Google Form' },
-          { label: 'Total records',     value: '1,066 cleaned reviews analyzed' },
+          { label: 'Total records',     value: `${STATS.TOTAL_REVIEWS} cleaned reviews analyzed` },
         ].map(s => (
           <div key={s.label} className="data-source-cell">
             <p className="data-source-label">{s.label}</p>
@@ -1430,24 +1422,23 @@ const NAV = [
   { id: 'mood',     label: 'New Vibe',  icon: '🎯' },
   { id: 'discover', label: 'Discover',  icon: '✦' },
   { id: 'whyai',    label: 'Why AI',    icon: '⚡' },
-  { id: 'workflow', label: 'Workflow',  icon: '⟳' },
   { id: 'research', label: 'Research',  icon: '🔬' },
   { id: 'taste',    label: 'My Taste',  icon: '📈' },
   { id: 'test',     label: 'Test',      icon: '🧪' },
 ];
 
 export default function App() {
-  const [screen,         setScreen]         = useState('mood');
-  const [nav,            setNav]            = useState('discover');
-  const [mood,           setMood]           = useState(null);
-  const [activity,       setActivity]       = useState(null);
-  const [bubbleBreaker,  setBubbleBreaker]  = useState(false);
-  const [skips,          setSkips]          = useState(0);
-  const [sessionSignals, setSessionSignals] = useState(0);
-  const [followed,       setFollowed]       = useState(loadFollowed);
-  const [backendOnline,  setBackendOnline]  = useState(null);
-  const [splashDone,     setSplashDone]     = useState(false);
-  const [splashHiding,   setSplashHiding]   = useState(false);
+  const session = useSession();
+  const [screen,        setScreen]        = useState('mood');
+  const [nav,           setNav]           = useState('discover');
+  const [mood,          setMood]          = useState(null);
+  const [activity,      setActivity]      = useState(null);
+  const [bubbleBreaker, setBubbleBreaker] = useState(false);
+  const [skips,         setSkips]         = useState(0);
+  const [followed,      setFollowed]      = useState(loadFollowed);
+  const [backendOnline, setBackendOnline] = useState(null);
+  const [splashDone,    setSplashDone]    = useState(false);
+  const [splashHiding,  setSplashHiding]  = useState(false);
   const yt = useAudioPlayer();
 
   // Splash screen
@@ -1474,14 +1465,13 @@ export default function App() {
     setActivity(act || 'Unwind');
     setBubbleBreaker(bubble);
     setSkips(0);
-    setSessionSignals(0);
+    session.resetSession();
     setScreen('discovery');
     setNav('discover');
   };
 
   const handleSkip = () => {
     setSkips(s => s + 1);
-    setSessionSignals(s => s + 1);
   };
 
   const handleFollow = (artist) => {
@@ -1491,14 +1481,12 @@ export default function App() {
       saveFollowed(next);
       return next;
     });
-    setSessionSignals(s => s + 1);
   };
 
   const handleNav = (id) => {
     yt.stop();
     setNav(id);
     if      (id === 'mood')     setScreen('mood');
-    else if (id === 'workflow') setScreen('workflow');
     else if (id === 'whyai')   setScreen('whyai');
     else if (id === 'research') setScreen('research');
     else if (id === 'taste')   setScreen(mood ? 'taste'     : 'mood');
@@ -1551,21 +1539,20 @@ export default function App() {
             {screen === 'discovery' && mood && (
               <DiscoveryScreen
                 mood={mood} activity={activity} skips={skips}
-                bubbleBreaker={bubbleBreaker} sessionSignals={sessionSignals}
+                bubbleBreaker={bubbleBreaker}
                 onSkip={handleSkip}
-                onNudgeAccept={(m) => { setMood(m); setSkips(0); setSessionSignals(0); setBubbleBreaker(false); }}
+                onNudgeAccept={(m) => { setMood(m); setSkips(0); session.resetSession(); setBubbleBreaker(false); }}
                 followed={followed} onFollow={handleFollow}
                 yt={yt}
               />
             )}
-            {screen === 'workflow'  && <WorkflowScreen />}
             {screen === 'whyai'     && <WhyAIScreen moodColor={mc} />}
             {screen === 'research'  && <ResearchScreen moodColor={mc} />}
             {screen === 'test'      && <TestScreen yt={yt} />}
             {screen === 'taste'     && mood && (
               <TasteScreen
                 mood={mood} followed={followed}
-                sessionSignals={sessionSignals} bubbleBreaker={bubbleBreaker}
+                bubbleBreaker={bubbleBreaker}
               />
             )}
           </main>
